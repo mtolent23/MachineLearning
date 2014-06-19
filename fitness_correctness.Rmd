@@ -1,0 +1,114 @@
+# Predictive Model For Fitness Exercise Correctness
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <a href="http://groupware.les.inf.puc-rio.br/har">http://groupware.les.inf.puc-rio.br/har</a> (see the section on the Weight Lifting Exercise Dataset). 
+
+## Objective
+The goal is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. We will find any of the other variables to predict with. In this report, we describe how we build the predictive model, how we use cross validation, what the expected out of sample error is, and why the choices we did.
+
+## Data Processing
+
+### Retrieve Data
+Let's download and read the training data from <a href=""http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv">http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv</a> as follow.
+```{r}
+if (!file.exists("./pml-training.csv")) {
+        download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                      destfile = "./pml-training.csv")
+}
+pml.training<-read.csv("./pml-training.csv")
+dim(pml.training)
+```
+
+### Clean Data
+Quick look at predictors:
+```{r}
+names(pml.training)
+```
+We remove columns user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window and num_window:
+```{r}
+pml.training<-subset(pml.training, select=-c(X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window))
+dim(pml.training)
+```
+Let's remove columns filled with NAs
+```{r}
+pml.training<-pml.training[,complete.cases(t(pml.training))]
+dim(pml.training)
+```
+
+### Pre-Process Data
+We now split the updated training dataset into a training dataset (70% of the observations) and a validation dataset (30% of the observations).
+```{r}
+library(caret)
+inTrain = createDataPartition(y=pml.training$classe, p=0.7, list=FALSE)
+small_train = pml.training[inTrain, ]
+small_valid = pml.training[-inTrain, ]
+dim(small_train)
+```
+(1) Let's remove near zero covariates
+```{r}
+library(caret)
+aux<-nearZeroVar(small_train, saveMetrics=TRUE)
+filter<-subset(aux, aux$nzv==FALSE)
+small_train<-small_train[,rownames(filter)]
+dim(small_train)
+```
+(2) We can see from below the highly correlated covariates
+```{r}
+library(corrplot)
+sub <- subset(small_train, select=-classe)
+pred.corr <- cor(sub[sapply(sub, is.numeric)])
+corrplot(pred.corr, order = "hclust", tl.cex=0.5)
+```
+(3) Let's filter out the highly correlated covariates
+```{r}
+highlyCor <- findCorrelation(pred.corr, 0.8)
+filtered <- sub[,-highlyCor]
+corData <- cor(filtered)
+corrplot(corData, order = "hclust", tl.cex=0.7)
+```
+(4) We apply to our training data
+```{r}
+var<-c(names(filtered), "classe")
+small_train<-small_train[,var]
+dim(small_train)
+```
+
+### Predictive Model
+Next, we train a model using a random forest approach on the smaller training dataset.
+```{r}
+library(randomForest)
+model <- randomForest(classe~., data=small_train)
+model
+```
+The confusion matrix indicates the model fits the training set well.
+```{r}
+model$confusion
+```
+
+### Cross Validation
+
+```{r}
+small_valid<-small_valid[,var]
+accurate<-c(as.numeric(predict(model,newdata=small_valid[,-ncol(small_valid)])==
+                small_valid$classe))
+accuracy<-sum(accurate)*100/nrow(small_valid)
+message("Model Accuracy as tested over Validation set = " , 
+        format(round(accuracy, 2), nsmall = 2), "%")
+```
+
+### Predicted Results
+
+We download the testing data set
+```{r}
+if (!file.exists("./pml-testing.csv")) {
+        download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                      destfile = "./pml-testing.csv")
+}
+pml.testing <- read.csv("./pml-testing.csv")
+```
+We subset to the right covariates and run the predictions with our model.
+```{r}
+proc.pml.testing<-pml.testing[,names(filtered)]
+predict(model, proc.pml.testing)
+```
+```
